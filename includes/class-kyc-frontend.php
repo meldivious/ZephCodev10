@@ -50,17 +50,6 @@ private static function generate_unique_user_id() {
     return $candidate_id;
 }
 
-// Add to user registration or first login
-function zls_generate_unique_id($user_id) {
-    $unique_id = get_user_meta($user_id, '_zls_unique_id', true);
-    if (empty($unique_id)) {
-        $unique_id = 'SS' . strtoupper(substr(md5($user_id . wp_salt() . time()), 0, 6));
-        update_user_meta($user_id, '_zls_unique_id', $unique_id);
-    }
-    return $unique_id;
-}
-
-
 /**
  * Generate unique user ID on first login
  * @param string $user_login
