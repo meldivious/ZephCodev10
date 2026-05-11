@@ -237,15 +237,21 @@ function zls_handle_ship_submission() {
     $result = ZLS_Ship_For_Me::submit();
     
     if ($result === true || is_numeric($result)) {
-        // Redirect to dashboard with success flag
-        wp_redirect(home_url('/my-dashboard?sfm_ok=1'));
-        exit;
+        // Redirect to dashboard with success flag (skip in admin/AJAX)
+        if (!is_admin() && !wp_doing_ajax()) {
+            wp_redirect(home_url('/my-dashboard?sfm_ok=1'));
+            exit;
+        }
+        return;
     }
     
     if (is_wp_error($result)) {
         set_transient('zls_ship_error_' . get_current_user_id(), $result->get_error_message(), 30);
-        wp_redirect(wp_get_referer());
-        exit;
+        if (!is_admin() && !wp_doing_ajax()) {
+            wp_redirect(wp_get_referer());
+            exit;
+        }
+        return;
     }
 }
 
@@ -276,17 +282,23 @@ function zls_handle_buy_submission() {
     // Submit the form
     $result = ZLS_Buy_For_Me::submit();
     
-    // Handle success
+    // Handle success (skip in admin/AJAX)
     if ($result === true || is_numeric($result)) {
-        wp_redirect(home_url('/my-dashboard?bfm_ok=1'));
-        exit;
+        if (!is_admin() && !wp_doing_ajax()) {
+            wp_redirect(home_url('/my-dashboard?bfm_ok=1'));
+            exit;
+        }
+        return;
     }
     
     // Handle error
     if (is_wp_error($result)) {
         set_transient('zls_buy_error_' . get_current_user_id(), $result->get_error_message(), 30);
-        wp_redirect(wp_get_referer());
-        exit;
+        if (!is_admin() && !wp_doing_ajax()) {
+            wp_redirect(wp_get_referer());
+            exit;
+        }
+        return;
     }
 }
 
@@ -294,6 +306,11 @@ function zls_handle_buy_submission() {
 add_shortcode('zls_dashboard', 'zls_render_dashboard_shortcode');
 
 function zls_render_dashboard_shortcode() {
+    // Skip redirect in admin/AJAX context to prevent JSON errors
+    if (is_admin() || wp_doing_ajax()) {
+        return;
+    }
+    
     // ✅ Guest redirect to /login
     if (!is_user_logged_in()) {
         wp_redirect(home_url('/login'));
@@ -321,7 +338,7 @@ function zls_render_dashboard_shortcode() {
         exit;
     }
 
-    // ✅ Handle KYC Submission
+    // ✅ Handle KYC Submission (skip in admin/AJAX)
     if (isset($_POST['zls_kyc_submit']) && isset($_POST['zls_nonce']) && wp_verify_nonce($_POST['zls_nonce'], 'zls_kyc_action') && !$is_admin) {
         update_user_meta($user_id, '_zls_kyc_data', array(
             'nin' => sanitize_text_field($_POST['zls_kyc_nin']),
@@ -329,17 +346,23 @@ function zls_render_dashboard_shortcode() {
             'address' => sanitize_textarea_field($_POST['zls_kyc_address'])
         ));
         update_user_meta($user_id, '_zls_kyc_status', 'pending');
-        wp_safe_redirect(add_query_arg('kyc_done', '1', wp_get_referer()));
-        exit;
+        if (!is_admin() && !wp_doing_ajax()) {
+            wp_safe_redirect(add_query_arg('kyc_done', '1', wp_get_referer()));
+            exit;
+        }
+        return;
     }
 
-// ✅ Handle SHIP Submission
+// ✅ Handle SHIP Submission (skip in admin/AJAX)
 if (isset($_POST['sfm_submit']) && isset($_POST['zls_ship_nonce']) && wp_verify_nonce($_POST['zls_ship_nonce'], 'zls_ship')) {
     if (class_exists('ZLS_Ship_For_Me')) {
         $res = ZLS_Ship_For_Me::submit();
         if ($res === true) { 
-            wp_safe_redirect(home_url('/my-dashboard')); 
-            exit; 
+            if (!is_admin() && !wp_doing_ajax()) {
+                wp_safe_redirect(home_url('/my-dashboard')); 
+                exit; 
+            }
+            return;
         }
         elseif (is_wp_error($res)) {
             $ship_error = $res->get_error_message();

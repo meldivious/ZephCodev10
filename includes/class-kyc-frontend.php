@@ -123,6 +123,11 @@ private static function generate_email_confirm_key($user_id) {
 * Screen 1: Login/Register/Forgot Password Page - All-in-One
 */
 public static function render_login_register() {
+// Skip redirect in admin/AJAX context to prevent JSON errors
+if (is_admin() || wp_doing_ajax()) {
+    return;
+}
+
 if (is_user_logged_in()) {
 // ✅ Check if user needs to go to KYC or dashboard
 $user_id = get_current_user_id();
@@ -163,13 +168,17 @@ $email_confirmed = get_user_meta($user->ID, '_zls_email_confirmed', true);
 if (!$is_admin && $email_confirmed !== '1') {
     // Email not confirmed - log them out and show message
     wp_logout();
-    wp_redirect(add_query_arg('email_confirm_error', '1', home_url('/login')));
-    exit;
+    if (!wp_doing_ajax() && !is_admin()) {
+        wp_redirect(add_query_arg('email_confirm_error', '1', home_url('/login')));
+        exit;
+    }
+} else {
+    // ✅ Redirect to KYC verification page instead of dashboard
+    if (!wp_doing_ajax() && !is_admin()) {
+        wp_redirect(home_url('/kyc-verification'));
+        exit;
+    }
 }
-
-// ✅ Redirect to KYC verification page instead of dashboard
-wp_redirect(home_url('/kyc-verification'));
-exit;
 }
 }
 // Check if user clicked password reset link
@@ -435,9 +444,11 @@ update_user_meta($user_id, '_zls_kyc_status', 'pending');
         $message .= "Thank you,\nZephora Logistics Team";
         wp_mail($email, $subject, $message);
         
-        // ✅ Redirect to login with registration success message
-        wp_redirect(add_query_arg('registered', '1', home_url('/login')));
-exit;
+        // ✅ Redirect to login with registration success message (skip in admin/AJAX)
+        if (!wp_doing_ajax() && !is_admin()) {
+            wp_redirect(add_query_arg('registered', '1', home_url('/login')));
+            exit;
+        }
 } else {
 echo '<div class="zls-error-message">Registration failed: ' . esc_html($user_id->get_error_message()) . '</div>';
 }
@@ -573,6 +584,11 @@ return ob_get_clean();
 * Screen 2: KYC Verification Status & Upload (New Design)
 */
 public static function render_kyc_verification() {
+// Skip redirect in admin/AJAX context to prevent JSON errors
+if (is_admin() || wp_doing_ajax()) {
+    return;
+}
+
 if (!is_user_logged_in()) {
 wp_redirect(home_url('/login'));
 exit;
