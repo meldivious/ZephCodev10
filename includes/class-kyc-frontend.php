@@ -821,41 +821,46 @@ handleFileSelect(input, id);
 <?php
 // Handle Upload Submission
 if (isset($_POST['zls_submit_kyc']) && isset($_POST['zls_kyc_nonce']) && wp_verify_nonce($_POST['zls_kyc_nonce'], 'zls_kyc_upload')) {
-if (isset($_FILES['zls_gov_id']) && isset($_FILES['zls_proof_address'])) {
-// Validation logic
-$allowed = ['image/jpeg', 'image/png', 'application/pdf'];
-$max_size = 10 * 1024 * 1024; // 10MB
-if (!in_array($_FILES['zls_gov_id']['type'], $allowed) || $_FILES['zls_gov_id']['size'] > $max_size) {
-echo '<div class="zls-alert error">Invalid Government ID file type or size (Max 10MB).</div>';
-} elseif (!in_array($_FILES['zls_proof_address']['type'], $allowed) || $_FILES['zls_proof_address']['size'] > $max_size) {
-echo '<div class="zls-alert error">Invalid Proof of Address file type or size (Max 10MB).</div>';
-} else {
-// Secure Upload
-$upload_dir = wp_upload_dir();
-$kyc_dir = $upload_dir['basedir'] . '/zls-kyc-documents/' . $user_id;
-if (!file_exists($kyc_dir)) {
-wp_mkdir_p($kyc_dir);
-file_put_contents($kyc_dir . '/.htaccess', "Deny from all");
-}
-$gov_name = 'gov_id_' . time() . '_' . wp_generate_password(8, false) . '.' . pathinfo($_FILES['zls_gov_id']['name'], PATHINFO_EXTENSION);
-$addr_name = 'addr_' . time() . '_' . wp_generate_password(8, false) . '.' . pathinfo($_FILES['zls_proof_address']['name'], PATHINFO_EXTENSION);
-if (move_uploaded_file($_FILES['zls_gov_id']['tmp_name'], $kyc_dir . '/' . $gov_name) &&
-move_uploaded_file($_FILES['zls_proof_address']['tmp_name'], $kyc_dir . '/' . $addr_name)) {
-update_user_meta($user_id, '_zls_kyc_data', [
-'gov_id_file' => $gov_name,
-'proof_address_file' => $addr_name,
-'submitted_at' => current_time('mysql')
-]);
-// ✅ Increment attempt counter
-$attempts = (int) get_user_meta($user_id, '_zls_kyc_attempts', true) ?: 0;
-update_user_meta($user_id, '_zls_kyc_attempts', $attempts + 1);
+    if (isset($_FILES['zls_gov_id']) && isset($_FILES['zls_proof_address'])) {
+        // Validation logic
+        $allowed = ['image/jpeg', 'image/png', 'application/pdf'];
+        $max_size = 10 * 1024 * 1024; // 10MB
+        if (!in_array($_FILES['zls_gov_id']['type'], $allowed) || $_FILES['zls_gov_id']['size'] > $max_size) {
+            echo '<div class="zls-alert error">Invalid Government ID file type or size (Max 10MB).</div>';
+        } elseif (!in_array($_FILES['zls_proof_address']['type'], $allowed) || $_FILES['zls_proof_address']['size'] > $max_size) {
+            echo '<div class="zls-alert error">Invalid Proof of Address file type or size (Max 10MB).</div>';
+        } else {
+            // Secure Upload
+            $upload_dir = wp_upload_dir();
+            $kyc_dir = $upload_dir['basedir'] . '/zls-kyc-documents/' . $user_id;
+            if (!file_exists($kyc_dir)) {
+                wp_mkdir_p($kyc_dir);
+                file_put_contents($kyc_dir . '/.htaccess', "Deny from all");
+            }
+            $gov_name = 'gov_id_' . time() . '_' . wp_generate_password(8, false) . '.' . pathinfo($_FILES['zls_gov_id']['name'], PATHINFO_EXTENSION);
+            $addr_name = 'addr_' . time() . '_' . wp_generate_password(8, false) . '.' . pathinfo($_FILES['zls_proof_address']['name'], PATHINFO_EXTENSION);
+            if (move_uploaded_file($_FILES['zls_gov_id']['tmp_name'], $kyc_dir . '/' . $gov_name) &&
+                move_uploaded_file($_FILES['zls_proof_address']['tmp_name'], $kyc_dir . '/' . $addr_name)) {
+                update_user_meta($user_id, '_zls_kyc_data', [
+                    'gov_id_file' => $gov_name,
+                    'proof_address_file' => $addr_name,
+                    'submitted_at' => current_time('mysql')
+                ]);
+                // ✅ Increment attempt counter
+                $attempts = (int) get_user_meta($user_id, '_zls_kyc_attempts', true) ?: 0;
+                update_user_meta($user_id, '_zls_kyc_attempts', $attempts + 1);
 
-update_user_meta($user_id, '_zls_kyc_status', 'pending');
-echo '<script>document.getElementById("zls-kyc-form").style.display="none"; document.querySelector(".zls-kyc-header h1").textContent="Submission Successful!"; document.querySelector(".zls-kyc-header p").textContent="Your documents have been received. You will be notified once reviewed."; document.querySelector(".zls-stepper .zls-step-circle.active").classList.add("done"); document.querySelector(".zls-stepper .zls-step-circle.active").textContent="✓"; </script>';
-} else {
-echo '<div class="zls-alert error">Failed to upload files. Please try again.</div>';
+                update_user_meta($user_id, '_zls_kyc_status', 'pending');
+                echo '<script>document.getElementById("zls-kyc-form").style.display="none"; document.querySelector(".zls-kyc-header h1").textContent="Submission Successful!"; document.querySelector(".zls-kyc-header p").textContent="Your documents have been received. You will be notified once reviewed."; document.querySelector(".zls-stepper .zls-step-circle.active").classList.add("done"); document.querySelector(".zls-stepper .zls-step-circle.active").textContent="✓"; </script>';
+            } else {
+                echo '<div class="zls-alert error">Failed to upload files. Please try again.</div>';
+            }
+        }
+    }
 }
-}
-}
+?>
+<?php endif; ?>
+</div>
+<?php
 return ob_get_clean();
 }
