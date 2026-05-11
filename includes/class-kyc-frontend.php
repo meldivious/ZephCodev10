@@ -716,7 +716,7 @@ Max attempts reached. Your account has been restricted. Please contact support.
 <button class="zls-btn-verify" style="background:#fff;color:#1f2937;margin-top:16px;" onclick="window.location.href='mailto:support@zephora.logistics'">Contact Support</button>
 </div>
 <?php endif; ?>
-<?php if ($kyc_status !== 'banned' && ($kyc_status !== 'pending' || !$documents_submitted)): ?>
+<?php if ($kyc_status !== 'banned' && ($kyc_status !== 'pending' || !$documents_submitted) && ($kyc_status !== 'denied' || $remaining > 0)): ?>
 <!-- Upload Form -->
 <div id="upload-section">
 <form method="post" enctype="multipart/form-data" id="zls-kyc-form">
@@ -859,7 +859,6 @@ if (isset($_POST['zls_submit_kyc']) && isset($_POST['zls_kyc_nonce']) && wp_veri
     }
 }
 ?>
-<?php endif; ?>
 </div>
 <?php
 return ob_get_clean();
