@@ -1,1 +1,32 @@
-Nothing should be ignored since only a PHP source file was modified and no build artifacts, dependencies, or temporary files were detected in the changes.
+```
+# Compiled and build artifacts
+*.pyc
+__pycache__/
+
+# Dependencies
+vendor/
+node_modules/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# WordPress specific
+wp-content/cache/
+*.sql
+wp-config-local.php
+
+# Backup files
+*.bak
+*.backup
+```

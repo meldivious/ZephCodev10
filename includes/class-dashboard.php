@@ -5,12 +5,15 @@
  */
 class ZLS_Dashboard {
     public static function render() {
+        // Skip redirect in admin/AJAX context to prevent JSON errors
+        if (is_admin() || wp_doing_ajax()) {
+            return '';
+        }
+        
         // Check login
         if (!is_user_logged_in()) {
-            return '<div style="text-align:center;padding:40px;font-family:system-ui,sans-serif;">
-                <h3>🔒 Login Required</h3>
-                <p>Please <a href="/login">log in</a> to access your dashboard.</p>
-            </div>';
+            wp_redirect(home_url('/login'));
+            exit;
         }
 
         $user_id = get_current_user_id();
@@ -25,9 +28,10 @@ class ZLS_Dashboard {
         $bank_details = get_option('zls_bank_details', array());
         $warehouse_address = get_option('zls_warehouse_address', array());
 
-        // KYC Check
+        // KYC Check - Redirect unapproved users to KYC page (admins bypass)
+        $is_admin = current_user_can('manage_options');
         $kyc_status = get_user_meta($user_id, '_zls_kyc_status', true) ?: 'pending';
-        if ($kyc_status !== 'approved') {
+        if (!$is_admin && $kyc_status !== 'approved') {
             wp_redirect(home_url('/kyc-verification'));
             exit;
         }

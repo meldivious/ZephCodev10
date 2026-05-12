@@ -585,10 +585,12 @@ exit;
 $user_id = get_current_user_id();
 $kyc_status = get_user_meta($user_id, '_zls_kyc_status', true) ?: 'pending';
 $kyc_data = get_user_meta($user_id, '_zls_kyc_data', true);
-// Redirect approved users to dashboard
-if ($kyc_status === 'approved') {
-wp_redirect(home_url('/my-dashboard'));
-exit;
+// ✅ FIX: Do NOT redirect approved users - let them see the KYC page
+// The dashboard and other pages will handle redirecting unapproved users back to KYC
+// Only admins bypass this check
+$is_admin = current_user_can('manage_options');
+if ($is_admin && $kyc_status !== 'approved') {
+    // Admins can see KYC page even if not approved
 }
 $kyc_note = get_user_meta($user_id, '_zls_kyc_note', true);
 // ✅ NEW: Get attempt count
@@ -851,4 +853,5 @@ if (isset($_POST['zls_submit_kyc']) && isset($_POST['zls_kyc_nonce']) && wp_veri
 </div>
 <?php
 return ob_get_clean();
+}
 }
