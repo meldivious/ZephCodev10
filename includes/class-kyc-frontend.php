@@ -8,9 +8,11 @@ add_shortcode('zls_login_register', [__CLASS__, 'render_login_register']);
 add_shortcode('zls_kyc_verification', [__CLASS__, 'render_kyc_verification']);
 add_action('wp_enqueue_scripts', [__CLASS__, 'enqueue_styles']);
 
- // ✅ NEW: Generate unique ID on first login
+// ✅ NEW: Generate unique ID on first login
     add_action('wp_login', array(__CLASS__, 'generate_unique_id_on_first_login'), 10, 2);
 
+// ✅ Email confirmation handler
+add_action('init', array(__CLASS__, 'handle_email_confirmation'));
 }
 public static function enqueue_styles() {
 wp_enqueue_style('zls-kyc-styles', ZLS_PLUGIN_URL . 'assets/css/kyc-frontend.css', [], ZLS_VERSION);
@@ -48,17 +50,6 @@ private static function generate_unique_user_id() {
     return $candidate_id;
 }
 
-// Add to user registration or first login
-function zls_generate_unique_id($user_id) {
-    $unique_id = get_user_meta($user_id, '_zls_unique_id', true);
-    if (empty($unique_id)) {
-        $unique_id = 'SS' . strtoupper(substr(md5($user_id . wp_salt() . time()), 0, 6));
-        update_user_meta($user_id, '_zls_unique_id', $unique_id);
-    }
-    return $unique_id;
-}
-
-
 /**
  * Generate unique user ID on first login
  * @param string $user_login
@@ -75,14 +66,71 @@ public static function generate_unique_id_on_first_login($user_login, $user) {
     }
 }
 
+/**
+ * Handle email confirmation for new registrations
+ */
+public static function handle_email_confirmation() {
+    // Check if user is clicking confirmation link
+    if (isset($_GET['zls_confirm_email']) && isset($_GET['key'])) {
+        $user_id = absint($_GET['zls_confirm_email']);
+        $confirm_key = sanitize_text_field($_GET['key']);
+        
+        $stored_key = get_user_meta($user_id, '_zls_email_confirm_key', true);
+        $is_confirmed = get_user_meta($user_id, '_zls_email_confirmed', true);
+        
+        // If already confirmed, just redirect to login
+        if ($is_confirmed === '1') {
+            wp_redirect(add_query_arg('email_confirmed', '1', home_url('/login')));
+            exit;
+        }
+        
+        // Validate key
+        if ($user_id && $stored_key && hash_equals($stored_key, $confirm_key)) {
+            update_user_meta($user_id, '_zls_email_confirmed', '1');
+            delete_user_meta($user_id, '_zls_email_confirm_key');
+            
+            // Redirect to login with success message
+            wp_redirect(add_query_arg('email_confirmed', '1', home_url('/login')));
+            exit;
+        } else {
+            // Invalid or expired link
+            wp_redirect(add_query_arg('email_confirm_error', '1', home_url('/login')));
+            exit;
+        }
+    }
+}
+
+/**
+ * Generate email confirmation key
+ */
+private static function generate_email_confirm_key($user_id) {
+    return wp_hash($user_id . wp_salt() . time() . wp_generate_password(20, false));
+}
+
 
 /**
 * Screen 1: Login/Register/Forgot Password Page - All-in-One
-* (Unchanged to preserve working functionality)
 */
 public static function render_login_register() {
-if (is_user_logged_in()) {
-wp_redirect(home_url('/my-dashboard'));
+// Skip redirect in admin/AJAX context to prevent JSON errors
+if (is_admin() || wp_doing_ajax()) {
+    return;
+}
+
+// ✅ FIX: Don't redirect if we're showing a message (email_confirmed, registered, etc.)
+$has_message = isset($_GET['email_confirmed']) || isset($_GET['registered']) || isset($_GET['email_confirm_error']);
+
+if (is_user_logged_in() && !$has_message) {
+// ✅ Check if user needs to go to KYC or dashboard
+$user_id = get_current_user_id();
+$is_admin = current_user_can('manage_options');
+$kyc_status = get_user_meta($user_id, '_zls_kyc_status', true) ?: 'pending';
+
+if ($is_admin || $kyc_status === 'approved') {
+    wp_redirect(home_url('/my-dashboard'));
+} else {
+    wp_redirect(home_url('/kyc-verification'));
+}
 exit;
 }
 // Initialize variables FIRST
@@ -105,8 +153,24 @@ if (is_wp_error($user)) {
 $error_message = $user->get_error_message();
 $login_error = wp_strip_all_tags($error_message);
 } else {
-wp_redirect(home_url('/my-dashboard'));
-exit;
+// ✅ Check email confirmation status (skip for admins)
+$is_admin = current_user_can('manage_options');
+$email_confirmed = get_user_meta($user->ID, '_zls_email_confirmed', true);
+
+if (!$is_admin && $email_confirmed !== '1') {
+    // Email not confirmed - log them out and show message
+    wp_logout();
+    if (!wp_doing_ajax() && !is_admin()) {
+        wp_redirect(add_query_arg('email_confirm_error', '1', home_url('/login')));
+        exit;
+    }
+} else {
+    // ✅ FIX: Redirect to KYC verification page instead of staying on login
+    if (!wp_doing_ajax() && !is_admin()) {
+        wp_safe_redirect(home_url('/kyc-verification'));
+        exit;
+    }
+}
 }
 }
 // Check if user clicked password reset link
@@ -261,7 +325,13 @@ transition: color 0.2s;
 <h2>Sign In</h2>
 <p class="zls-login-subtitle">Enter your credentials to manage shipments</p>
 <?php if (isset($_GET['registered'])): ?>
-<div class="zls-success-message">Registration successful! Please log in.</div>
+<div class="zls-success-message">✅ Registration successful! Please check your email and click the confirmation link, then log in.</div>
+<?php endif; ?>
+<?php if (isset($_GET['email_confirmed'])): ?>
+<div class="zls-success-message">✅ Email confirmed! You can now log in.</div>
+<?php endif; ?>
+<?php if (isset($_GET['email_confirm_error'])): ?>
+<div class="zls-error-message">❌ Invalid or expired confirmation link. Please register again.</div>
 <?php endif; ?>
 <!-- Display Login Error Inline -->
 <?php if (!empty($login_error)): ?>
@@ -330,7 +400,11 @@ if (empty($first_name)) $errors[] = 'First name is required';
 if (empty($last_name)) $errors[] = 'Last name is required';
 if (empty($email) || !is_email($email)) $errors[] = 'Valid email is required';
 if (email_exists($email)) $errors[] = 'Email already registered';
-if (strlen($password) < 6) $errors[] = 'Password must be at least 6 characters';
+// ✅ Enhanced password validation - minimum 8 characters with complexity
+if (strlen($password) < 8) $errors[] = 'Password must be at least 8 characters';
+if (!preg_match('/[A-Z]/', $password)) $errors[] = 'Password must contain at least one uppercase letter';
+if (!preg_match('/[a-z]/', $password)) $errors[] = 'Password must contain at least one lowercase letter';
+if (!preg_match('/[0-9]/', $password)) $errors[] = 'Password must contain at least one number';
 if ($password !== $confirm_password) $errors[] = 'Passwords do not match';
 if (empty($errors)) {
 $user_id = wp_create_user($email, $password, $email);
@@ -338,21 +412,35 @@ if (!is_wp_error($user_id)) {
 wp_update_user(['ID' => $user_id, 'first_name' => $first_name, 'last_name' => $last_name]);
 update_user_meta($user_id, '_zls_phone', $phone);
 update_user_meta($user_id, '_zls_kyc_status', 'pending');
+        // ✅ Set email as unconfirmed initially
+        update_user_meta($user_id, '_zls_email_confirmed', '0');
+        
+        // ✅ Generate confirmation key
+        $confirm_key = self::generate_email_confirm_key($user_id);
+        update_user_meta($user_id, '_zls_email_confirm_key', $confirm_key);
+        
         // ✅ NEW: Generate and Save Unique ID
         $unique_id = self::generate_unique_user_id();
         update_user_meta($user_id, '_zls_unique_id', $unique_id);
 
-        // Update Welcome Email to include the ID
-        $subject = 'Welcome to Zephora Logistics';
+        // ✅ Send confirmation email instead of welcome email
+        $subject = 'Confirm Your Registration - Zephora Logistics';
+        $confirm_link = add_query_arg(['zls_confirm_email' => $user_id, 'key' => $confirm_key], home_url('/login'));
         $message = "Hello {$first_name},\n";
-        $message .= "Welcome to Zephora Logistics! Your account has been created.\n";
-        $message .= "Your Unique ID is: {$unique_id}\n"; // Add this line
-        $message .= "Please complete your KYC verification to access our services.\n";
-        $message .= "Login at: " . home_url('/login') . "\n";
+        $message .= "Welcome to Zephora Logistics! Your account has been created.\n\n";
+        $message .= "Please confirm your email address by clicking the link below:\n";
+        $message .= $confirm_link . "\n\n";
+        $message .= "Your Unique ID is: {$unique_id}\n";
+        $message .= "After confirming your email, please log in and complete your KYC verification to access our services.\n";
+        $message .= "Login at: " . home_url('/login') . "\n\n";
         $message .= "Thank you,\nZephora Logistics Team";
-wp_mail($email, $subject, $message);
-wp_redirect(add_query_arg('registered', '1', home_url('/login')));
-exit;
+        wp_mail($email, $subject, $message);
+        
+        // ✅ Redirect to login with registration success message (skip in admin/AJAX)
+        if (!wp_doing_ajax() && !is_admin()) {
+            wp_redirect(add_query_arg('registered', '1', home_url('/login')));
+            exit;
+        }
 } else {
 echo '<div class="zls-error-message">Registration failed: ' . esc_html($user_id->get_error_message()) . '</div>';
 }
@@ -420,7 +508,7 @@ if (targetForm) {
 targetForm.style.display = 'block';
 }
 }
-// Password Toggle Handler
+// Password Toggle Handler - works for all password fields (login, register, reset)
 document.addEventListener('click', function(e) {
 const toggleBtn = e.target.closest('.zls-toggle-password');
 if (!toggleBtn) return;
@@ -433,31 +521,66 @@ input.type = isHidden ? 'text' : 'password';
 eyeOpen.style.display = isHidden ? 'none' : 'block';
 eyeClosed.style.display = isHidden ? 'block' : 'none';
 });
+
+// ✅ Show password strength indicator on registration
+document.addEventListener('DOMContentLoaded', function() {
+    const passwordInput = document.querySelector('input[name="zls_register_password"]');
+    if (passwordInput) {
+        passwordInput.addEventListener('input', function() {
+            const password = this.value;
+            let strength = 0;
+            if (password.length >= 8) strength++;
+            if (/[A-Z]/.test(password)) strength++;
+            if (/[a-z]/.test(password)) strength++;
+            if (/[0-9]/.test(password)) strength++;
+            if (/[^A-Za-z0-9]/.test(password)) strength++;
+            
+            // Remove existing strength indicator if any
+            const existingIndicator = this.parentElement.querySelector('.zls-password-strength');
+            if (existingIndicator) existingIndicator.remove();
+            
+            // Create strength indicator
+            const indicator = document.createElement('div');
+            indicator.className = 'zls-password-strength';
+            indicator.style.cssText = 'margin-top: 8px; padding: 8px; border-radius: 6px; font-size: 12px; font-weight: 600;';
+            
+            if (password.length === 0) {
+                indicator.style.display = 'none';
+            } else if (strength < 3) {
+                indicator.style.background = '#fee2e2';
+                indicator.style.color = '#991b1b';
+                indicator.textContent = 'Weak password - needs uppercase, lowercase, and number';
+                indicator.style.display = 'block';
+            } else if (strength < 5) {
+                indicator.style.background = '#fef3c7';
+                indicator.style.color = '#d97706';
+                indicator.textContent = 'Medium password - consider adding special characters';
+                indicator.style.display = 'block';
+            } else {
+                indicator.style.background = '#d1fae5';
+                indicator.style.color = '#065f46';
+                indicator.textContent = 'Strong password!';
+                indicator.style.display = 'block';
+            }
+            
+            this.parentElement.appendChild(indicator);
+        });
+    }
+});
 </script>
 <?php
-// Handle login submission
-if (isset($_POST['zls_login_submit'])) {
-$creds = [
-'user_login' => sanitize_email($_POST['zls_email']),
-'user_password' => $_POST['zls_password'],
-'remember' => isset($_POST['zls_remember'])
-];
-$user = wp_signon($creds, false);
-if (is_wp_error($user)) {
-// Strip HTML tags and get clean error message
-$error_message = $user->get_error_message();
-$login_error = wp_strip_all_tags($error_message);
-} else {
-wp_redirect(home_url('/my-dashboard'));
-exit;
-}
-}
+// ✅ No duplicate login handling here - already processed at lines 139-166
 return ob_get_clean();
 }
 /**
 * Screen 2: KYC Verification Status & Upload (New Design)
 */
 public static function render_kyc_verification() {
+// Skip redirect in admin/AJAX context to prevent JSON errors
+if (is_admin() || wp_doing_ajax()) {
+    return;
+}
+
 if (!is_user_logged_in()) {
 wp_redirect(home_url('/login'));
 exit;
@@ -465,10 +588,12 @@ exit;
 $user_id = get_current_user_id();
 $kyc_status = get_user_meta($user_id, '_zls_kyc_status', true) ?: 'pending';
 $kyc_data = get_user_meta($user_id, '_zls_kyc_data', true);
-// Redirect approved users to dashboard
-if ($kyc_status === 'approved') {
-wp_redirect(home_url('/my-dashboard'));
-exit;
+// ✅ FIX: Do NOT redirect approved users - let them see the KYC page
+// The dashboard and other pages will handle redirecting unapproved users back to KYC
+// Only admins bypass this check
+$is_admin = current_user_can('manage_options');
+if ($is_admin && $kyc_status !== 'approved') {
+    // Admins can see KYC page even if not approved
 }
 $kyc_note = get_user_meta($user_id, '_zls_kyc_note', true);
 // ✅ NEW: Get attempt count
@@ -585,7 +710,7 @@ Max attempts reached. Your account has been restricted. Please contact support.
 <button class="zls-btn-verify" style="background:#fff;color:#1f2937;margin-top:16px;" onclick="window.location.href='mailto:support@zephora.logistics'">Contact Support</button>
 </div>
 <?php endif; ?>
-<?php if ($kyc_status !== 'banned' && ($kyc_status !== 'pending' || !$documents_submitted)): ?>
+<?php if ($kyc_status !== 'banned' && ($kyc_status !== 'pending' || !$documents_submitted) && ($kyc_status !== 'denied' || $remaining > 0)): ?>
 <!-- Upload Form -->
 <div id="upload-section">
 <form method="post" enctype="multipart/form-data" id="zls-kyc-form">
@@ -690,39 +815,46 @@ handleFileSelect(input, id);
 <?php
 // Handle Upload Submission
 if (isset($_POST['zls_submit_kyc']) && isset($_POST['zls_kyc_nonce']) && wp_verify_nonce($_POST['zls_kyc_nonce'], 'zls_kyc_upload')) {
-if (isset($_FILES['zls_gov_id']) && isset($_FILES['zls_proof_address'])) {
-// Validation logic
-$allowed = ['image/jpeg', 'image/png', 'application/pdf'];
-$max_size = 10 * 1024 * 1024; // 10MB
-if (!in_array($_FILES['zls_gov_id']['type'], $allowed) || $_FILES['zls_gov_id']['size'] > $max_size) {
-echo '<div class="zls-alert error">Invalid Government ID file type or size (Max 10MB).</div>';
-} elseif (!in_array($_FILES['zls_proof_address']['type'], $allowed) || $_FILES['zls_proof_address']['size'] > $max_size) {
-echo '<div class="zls-alert error">Invalid Proof of Address file type or size (Max 10MB).</div>';
-} else {
-// Secure Upload
-$upload_dir = wp_upload_dir();
-$kyc_dir = $upload_dir['basedir'] . '/zls-kyc-documents/' . $user_id;
-if (!file_exists($kyc_dir)) {
-wp_mkdir_p($kyc_dir);
-file_put_contents($kyc_dir . '/.htaccess', "Deny from all");
+    if (isset($_FILES['zls_gov_id']) && isset($_FILES['zls_proof_address'])) {
+        // Validation logic
+        $allowed = ['image/jpeg', 'image/png', 'application/pdf'];
+        $max_size = 10 * 1024 * 1024; // 10MB
+        if (!in_array($_FILES['zls_gov_id']['type'], $allowed) || $_FILES['zls_gov_id']['size'] > $max_size) {
+            echo '<div class="zls-alert error">Invalid Government ID file type or size (Max 10MB).</div>';
+        } elseif (!in_array($_FILES['zls_proof_address']['type'], $allowed) || $_FILES['zls_proof_address']['size'] > $max_size) {
+            echo '<div class="zls-alert error">Invalid Proof of Address file type or size (Max 10MB).</div>';
+        } else {
+            // Secure Upload
+            $upload_dir = wp_upload_dir();
+            $kyc_dir = $upload_dir['basedir'] . '/zls-kyc-documents/' . $user_id;
+            if (!file_exists($kyc_dir)) {
+                wp_mkdir_p($kyc_dir);
+                file_put_contents($kyc_dir . '/.htaccess', "Deny from all");
+            }
+            $gov_name = 'gov_id_' . time() . '_' . wp_generate_password(8, false) . '.' . pathinfo($_FILES['zls_gov_id']['name'], PATHINFO_EXTENSION);
+            $addr_name = 'addr_' . time() . '_' . wp_generate_password(8, false) . '.' . pathinfo($_FILES['zls_proof_address']['name'], PATHINFO_EXTENSION);
+            if (move_uploaded_file($_FILES['zls_gov_id']['tmp_name'], $kyc_dir . '/' . $gov_name) &&
+                move_uploaded_file($_FILES['zls_proof_address']['tmp_name'], $kyc_dir . '/' . $addr_name)) {
+                update_user_meta($user_id, '_zls_kyc_data', [
+                    'gov_id_file' => $gov_name,
+                    'proof_address_file' => $addr_name,
+                    'submitted_at' => current_time('mysql')
+                ]);
+                // ✅ Increment attempt counter
+                $attempts = (int) get_user_meta($user_id, '_zls_kyc_attempts', true) ?: 0;
+                update_user_meta($user_id, '_zls_kyc_attempts', $attempts + 1);
+
+                update_user_meta($user_id, '_zls_kyc_status', 'pending');
+                echo '<script>document.getElementById("zls-kyc-form").style.display="none"; document.querySelector(".zls-kyc-header h1").textContent="Submission Successful!"; document.querySelector(".zls-kyc-header p").textContent="Your documents have been received. You will be notified once reviewed."; document.querySelector(".zls-stepper .zls-step-circle.active").classList.add("done"); document.querySelector(".zls-stepper .zls-step-circle.active").textContent="✓"; </script>';
+            } else {
+                echo '<div class="zls-alert error">Failed to upload files. Please try again.</div>';
+            }
+        }
+    }
 }
-$gov_name = 'gov_id_' . time() . '_' . wp_generate_password(8, false) . '.' . pathinfo($_FILES['zls_gov_id']['name'], PATHINFO_EXTENSION);
-$addr_name = 'addr_' . time() . '_' . wp_generate_password(8, false) . '.' . pathinfo($_FILES['zls_proof_address']['name'], PATHINFO_EXTENSION);
-if (move_uploaded_file($_FILES['zls_gov_id']['tmp_name'], $kyc_dir . '/' . $gov_name) &&
-move_uploaded_file($_FILES['zls_proof_address']['tmp_name'], $kyc_dir . '/' . $addr_name)) {
-update_user_meta($user_id, '_zls_kyc_data', [
-'gov_id_file' => $gov_name,
-'proof_address_file' => $addr_name,
-'submitted_at' => current_time('mysql')
-]);
-update_user_meta($user_id, '_zls_kyc_status', 'pending');
-echo '<script>document.getElementById("zls-kyc-form").style.display="none"; document.querySelector(".zls-kyc-header h1").textContent="Submission Successful!"; document.querySelector(".zls-kyc-header p").textContent="Your documents have been received. You will be notified once reviewed."; document.querySelector(".zls-stepper .zls-step-circle.active").classList.add("done"); document.querySelector(".zls-stepper .zls-step-circle.active").textContent="✓"; </script>';
-} else {
-echo '<div class="zls-alert error">Failed to upload files. Please try again.</div>';
-}
-}
-}
-}
+?>
+</div>
+<?php
 return ob_get_clean();
 }
 }

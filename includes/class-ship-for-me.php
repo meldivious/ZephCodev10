@@ -27,8 +27,24 @@ class ZLS_Ship_For_Me extends ZLS_Request_Base {
      * Render Ship For Me form
      */
     public static function render() {
+        // Skip redirect in admin/AJAX context to prevent JSON errors
+        if (is_admin() || wp_doing_ajax()) {
+            return '';
+        }
+        
+        // Redirect non-logged-in users to login
         if (!is_user_logged_in()) {
             wp_redirect(home_url('/login'));
+            exit;
+        }
+        
+        $user_id = get_current_user_id();
+        $is_admin = current_user_can('manage_options');
+        $kyc_status = get_user_meta($user_id, '_zls_kyc_status', true) ?: 'pending';
+        
+        // Redirect to KYC if not approved (unless admin)
+        if (!$is_admin && $kyc_status !== 'approved') {
+            wp_redirect(home_url('/kyc-verification'));
             exit;
         }
 
