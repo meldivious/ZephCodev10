@@ -117,7 +117,10 @@ if (is_admin() || wp_doing_ajax()) {
     return;
 }
 
-if (is_user_logged_in()) {
+// ✅ FIX: Don't redirect if we're showing a message (email_confirmed, registered, etc.)
+$has_message = isset($_GET['email_confirmed']) || isset($_GET['registered']) || isset($_GET['email_confirm_error']);
+
+if (is_user_logged_in() && !$has_message) {
 // ✅ Check if user needs to go to KYC or dashboard
 $user_id = get_current_user_id();
 $is_admin = current_user_can('manage_options');
@@ -162,9 +165,9 @@ if (!$is_admin && $email_confirmed !== '1') {
         exit;
     }
 } else {
-    // ✅ Redirect to KYC verification page instead of dashboard
+    // ✅ FIX: Redirect to KYC verification page instead of staying on login
     if (!wp_doing_ajax() && !is_admin()) {
-        wp_redirect(home_url('/kyc-verification'));
+        wp_safe_redirect(home_url('/kyc-verification'));
         exit;
     }
 }

@@ -386,6 +386,27 @@ if (isset($_POST['sfm_submit']) && isset($_POST['zls_ship_nonce']) && wp_verify_
 add_shortcode('zls_ship_for_me', 'zls_render_ship_for_me_shortcode');
 
 function zls_render_ship_for_me_shortcode() {
+    // Skip redirect in admin/AJAX context to prevent JSON errors
+    if (is_admin() || wp_doing_ajax()) {
+        return;
+    }
+    
+    // ✅ Guest redirect to /login
+    if (!is_user_logged_in()) {
+        wp_redirect(home_url('/login'));
+        exit;
+    }
+    
+    $user_id = get_current_user_id();
+    $is_admin = current_user_can('manage_options');
+    
+    // ✅ KYC Check - Redirect unapproved users to KYC page (admins bypass)
+    $kyc_status = get_user_meta($user_id, '_zls_kyc_status', true) ?: 'pending';
+    if (!$is_admin && $kyc_status !== 'approved') {
+        wp_redirect(home_url('/kyc-verification'));
+        exit;
+    }
+    
     if (class_exists('ZLS_Ship_For_Me')) {
         return ZLS_Ship_For_Me::render();
     }
@@ -395,6 +416,27 @@ function zls_render_ship_for_me_shortcode() {
 // Add Buy For Me shortcode
 add_shortcode('zls_buy_for_me', 'zls_render_buy_for_me_shortcode');
 function zls_render_buy_for_me_shortcode() {
+    // Skip redirect in admin/AJAX context to prevent JSON errors
+    if (is_admin() || wp_doing_ajax()) {
+        return;
+    }
+    
+    // ✅ Guest redirect to /login
+    if (!is_user_logged_in()) {
+        wp_redirect(home_url('/login'));
+        exit;
+    }
+    
+    $user_id = get_current_user_id();
+    $is_admin = current_user_can('manage_options');
+    
+    // ✅ KYC Check - Redirect unapproved users to KYC page (admins bypass)
+    $kyc_status = get_user_meta($user_id, '_zls_kyc_status', true) ?: 'pending';
+    if (!$is_admin && $kyc_status !== 'approved') {
+        wp_redirect(home_url('/kyc-verification'));
+        exit;
+    }
+    
     if (class_exists('ZLS_Buy_For_Me')) {
         return ZLS_Buy_For_Me::render();
     }
